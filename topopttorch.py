@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 
 def top3d(nelx, nely, nelz, volfrac, penal, rmin):
@@ -31,8 +32,12 @@ def top3d(nelx, nely, nelz, volfrac, penal, rmin):
     
     
     size = torch.Size([ndof, 1])
-    F = torch.sparse_coo_tensor(size, dtype=torch.float32)
-    F[loaddof,:] = -1
+    F = torch.sparse_coo_tensor(
+    indices=torch.tensor([[loaddof, j] for j in range(size[1])]).t(),
+    values=torch.full((size[1],), -1, dtype=torch.float32),
+    size=size,
+)
+
         
     U = torch.zeros(ndof, 1)
     freedofs = torch.tensor(list(set(range(1, ndof + 1)) - set(fixeddof.tolist())))
@@ -42,7 +47,7 @@ def top3d(nelx, nely, nelz, volfrac, penal, rmin):
     nodeidz = torch.arange(0, (nely + 1) * (nelx + 1) * (nelz - 1) + 1, (nely + 1) * (nelx + 1))
     nodeids = nodeids.repeat(1, nodeidz.shape[0]) + nodeidz.repeat(nodeids.shape[0], 1)
     edofVec = 3 * nodeids + 1
-
+    
     offsets = torch.tensor([0, 1, 2, 3 * nely + torch.tensor([3, 4, 5, 0, 1, 2]), -3, -2, -1, 3 * (nely + 1) * (nelx + 1) + torch.tensor([0, 1, 2, 3 * nely + torch.tensor([3, 4, 5, 0, 1, 2]), -3, -2, -1])])
     edofMat = edofVec.unsqueeze(1) + offsets.unsqueeze(0)  # Perform element-wise addition with broadcasting
     
@@ -142,61 +147,67 @@ def top3d(nelx, nely, nelz, volfrac, penal, rmin):
 
 
 
-def lk_H8(nu):
-    A = torch.tensor([[32, 6, -8, 6, -6, 4, 3, -6, -10, 3, -3, -3, -4, -8],
-                      [-48, 0, 0, -24, 24, 0, 0, 0, 12, -12, 0, 12, 12, 12]])
 
+def lk_H8(nu):
+    A = np.array([[32, 6, -8, 6, -6, 4, 3, -6, -10, 3, -3, -3, -4, -8],
+                  [-48, 0, 0, -24, 24, 0, 0, 0, 12, -12, 0, 12, 12, 12]], dtype=np.float32)
+
+    # Calculate k using NumPy operations
+    k = (1 / 144) * np.matmul(A.T, np.array([1, nu], dtype=np.float32).reshape(-1, 1))
+
+    # Split k into submatrices
+    K1 = np.array([[k[0], k[1], k[1], k[2], k[4], k[4]],
+                   [k[1], k[0], k[1], k[3], k[5], k[6]],
+                   [k[1], k[1], k[0], k[3], k[6], k[5]],
+                   [k[2], k[3], k[3], k[0], k[7], k[7]],
+                   [k[4], k[5], k[6], k[7], k[0], k[1]],
+                   [k[4], k[6], k[5], k[7], k[1], k[0]]]).squeeze()
+
+    K2 = np.array([[k[8],  k[7],  k[11], k[5],  k[3],  k[6]],
+                   [k[7],  k[8],  k[11], k[4],  k[2],  k[5]],
+                   [k[9],  k[9],  k[12], k[6],  k[4],  k[5]],
+                   [k[5],  k[4],  k[10], k[8],  k[1],  k[9]],
+                   [k[3],  k[2],  k[4],  k[1],  k[8],  k[11]],
+                   [k[10], k[4],  k[6],  k[12], k[10], k[12]]]).squeeze()
+
+    K3 = np.array([[k[6],  k[7],  k[4],  k[9],  k[12], k[8]],
+                   [k[7],  k[6],  k[4],  k[10], k[13], k[10]],
+                   [k[5],  k[5],  k[3],  k[8],  k[12], k[9]],
+                   [k[9],  k[10], k[2],  k[6],  k[11], k[5]],
+                   [k[12], k[13], k[10], k[11], k[6],  k[4]],
+                   [k[2],  k[12], k[9],  k[4],  k[5],  k[3]]]).squeeze()
+
+    K4 = np.array([[k[13], k[10], k[10], k[12], k[9],  k[9]],
+                   [k[10], k[13], k[10], k[11], k[8],  k[7]],
+                   [k[10], k[10], k[13], k[11], k[7],  k[8]],
+                   [k[12], k[11], k[11], k[13], k[6],  k[6]],
+                   [k[9],  k[8],  k[7],  k[6],  k[13], k[10]],
+                   [k[9],  k[7],  k[8],  k[6],  k[10], k[13]]]).squeeze()
+
+    K5 = np.array([[k[0], k[1],  k[7],  k[2], k[4],  k[3]],
+                   [k[1], k[0],  k[7],  k[3], k[5],  k[10]],
+                   [k[7], k[7],  k[0],  k[4], k[10], k[5]],
+                   [k[2], k[3],  k[4],  k[0], k[7],  k[1]],
+                   [k[4], k[5],  k[10], k[7], k[0],  k[7]],
+                   [k[3], k[10], k[5],  k[1], k[7],  k[0]]]).squeeze()
+
+    K6 = np.array([[k[13], k[10], k[6],  k[12], k[9],  k[11]],
+                   [k[10], k[13], k[6],  k[11], k[8],  k[2]],
+                   [k[6],  k[6],  k[13], k[10], k[2],  k[9]],
+                   [k[12], k[11], k[10], k[13], k[7],  k[7]],
+                   [k[9],  k[8],  k[2],  k[7],  k[13], k[7]],
+                   [k[11], k[2],  k[9],  k[10], k[7],  k[13]]]).squeeze()
     
-    k = (1 / 144) * torch.matmul(A.t(), torch.tensor([1, nu]).unsqueeze(1))
-    
-    K1 = torch.tensor([[k[0], k[1], k[1], k[2], k[4], k[4]],
-                      [k[1], k[0], k[1], k[3], k[5], k[6]],
-                      [k[1], k[1], k[0], k[3], k[6], k[5]],
-                      [k[2], k[3], k[3], k[0], k[7], k[7]],
-                      [k[4], k[5], k[6], k[7], k[0], k[1]],
-                      [k[4], k[6], k[5], k[7], k[1], k[0]]])
-    
-    K2 = torch.tensor([[k[8],  k[7],  k[11], k[5],  k[3],  k[6]],
-                      [k[7],  k[8],  k[11], k[4],  k[2],  k[4]],
-                      [k[9],  k[9],  k[12], k[6],  k[3],  k[5]],
-                      [k[5],  k[4],  k[10], k[8],  k[1],  k[9]],
-                      [k[3],  k[2],  k[4],  k[1],  k[8],  k[11]],
-                      [k[10], k[3],  k[5],  k[11], k[9],  k[12]]])
-    
-    K3 = torch.tensor([[k[5],  k[6],  k[3],  k[8],  k[11], k[7]],
-                      [k[6],  k[5],  k[3],  k[9],  k[12], k[10]],
-                      [k[4],  k[4],  k[2],  k[7],  k[10], k[9]],
-                      [k[8],  k[9],  k[1],  k[5],  k[11], k[4]],
-                      [k[11], k[12], k[10], k[11], k[6],  k[4]],
-                      [k[1],  k[11], k[9],  k[4],  k[5],  k[3]]])
-    
-    K4 = torch.tensor([[k[13], k[10], k[10], k[12], k[9],  k[9]],
-                      [k[10], k[13], k[10], k[11], k[8],  k[7]],
-                      [k[10], k[10], k[13], k[11], k[7],  k[8]],
-                      [k[12], k[11], k[11], k[13], k[6],  k[6]],
-                      [k[9],  k[8],  k[7],  k[6],  k[13], k[10]],
-                      [k[9],  k[7],  k[8],  k[6],  k[10], k[13]]])
-    
-    K5 = torch.tensor([[k[0],  k[1],  k[7],  k[2],  k[4],  k[3]],
-                      [k[1],  k[0],  k[7],  k[3],  k[5],  k[10]],
-                      [k[7],  k[7],  k[0],  k[4],  k[10], k[5]],
-                      [k[2],  k[3],  k[4],  k[0],  k[7],  k[1]],
-                      [k[4],  k[5],  k[10], k[7],  k[0],  k[7]],
-                      [k[3],  k[10], k[5],  k[1],  k[7],  k[0]]])
-    
-    K6 = torch.tensor([[k[13], k[10], k[6],  k[12], k[9],  k[11]],
-                      [k[10], k[13], k[6],  k[11], k[8],  k[1]],
-                      [k[6],  k[6],  k[13], k[9],  k[1],  k[8]],
-                      [k[12], k[11], k[9],  k[13], k[6],  k[10]],
-                      [k[9],  k[8],  k[1],  k[6],  k[13], k[6]],
-                      [k[11], k[1],  k[8],  k[10], k[6],  k[13]]])
-    
-    KE_1 = torch.stack([K1, K2, K3, K4])
-    KE_2 = torch.stack([K2.t(), K5, K6, K3.t()])
-    KE_3 = torch.stack([K3.t(), K6, K5.t(), K2.t()])
-    KE_4 = torch.stack([K4, K3, K2, K1])
-    
-    KE = torch.cat([KE_1, KE_2, KE_3, KE_4], dim=1)
+    print(K1.shape,  K2.shape, K3.shape, K4.shape, K5.shape, K6.shape)
+    # Assemble the global stiffness matrix KE
+    KE = (1 / ((nu + 1) * (1 - 2 * nu))) * np.block([[K1, K2, K3, K4],
+                                                     [K2.T, K5, K6, K3.T],
+                                                     [K3.T, K6, K5.T, K2.T],
+                                                     [K4, K3, K2, K1]])
+
+    return KE
+
+# Example usage:
     return KE
 
 if __name__ == "__main__":
